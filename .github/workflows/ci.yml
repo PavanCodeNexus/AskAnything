@@ -1,0 +1,54 @@
+name: CI / Test Suite
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Build & Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends tesseract-ocr ffmpeg libsndfile1
+
+      - name: Install PyTorch (CPU) & Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements.txt
+
+      - name: Verify Python Code Syntax
+        run: |
+          python -m py_compile app.py rag_engine.py grounding.py vectorstore.py query_rewriter.py
+
+      - name: Run System Tests
+        env:
+          GROQ_API_KEY: "mock_key_for_ci_pipeline"
+        run: |
+          python test_system.py
+
+      - name: Run Web Search & Citations Tests
+        env:
+          GROQ_API_KEY: "mock_key_for_ci_pipeline"
+        run: |
+          python -m unittest discover -s tests -p "test_*.py"
