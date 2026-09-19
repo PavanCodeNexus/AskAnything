@@ -1,5 +1,11 @@
 # ⚡ AskAnything — Multimodal RAG Assistant
 
+[![CI / Test Suite](https://github.com/PavanCodeNexus/AskAnything/actions/workflows/ci.yml/badge.svg)](https://github.com/PavanCodeNexus/AskAnything/actions/workflows/ci.yml)
+[![Python Version](https://img.shields.io/badge/Python-3.10%20%7C%203.11-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Streamlit](https://img.shields.io/badge/Streamlit-1.35%2B-FF4B4B?logo=streamlit&logoColor=white)](https://streamlit.io/)
+[![Groq](https://img.shields.io/badge/Groq-Llama%203.3%2070B-F55036)](https://groq.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 AskAnything is an enterprise-grade Multimodal Retrieval-Augmented Generation (RAG) assistant that unifies heterogeneous source ingestion, hybrid vector + keyword retrieval, cross-encoder reranking, claim-level knowledge conflict detection, multi-signal evidence scoring, multilingual translation, voice chat (STT/TTS), and dynamic mind map visualization into a single unified workflow.
 
 ---
