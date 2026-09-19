@@ -1,0 +1,7 @@
+tesseract-ocr
+tesseract-ocr-hin
+tesseract-ocr-kan
+tesseract-ocr-tam
+tesseract-ocr-tel
+ffmpeg
+libsndfile1
