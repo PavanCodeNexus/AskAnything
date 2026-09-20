@@ -250,7 +250,7 @@ if "session_id" not in st.session_state:
         st.session_state.documents = {}
 
 if "sessions" not in st.session_state:
-    st.session_state.sessions = {st.session_state.session_id: "Default Workspace"}
+    st.session_state.sessions = {st.session_state.session_id: "New chat"}
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
@@ -269,6 +269,9 @@ if "active_mindmap_idx" not in st.session_state:
 
 if "enable_web_search" not in st.session_state:
     st.session_state.enable_web_search = True
+
+if "renaming_session_id" not in st.session_state:
+    st.session_state.renaming_session_id = None
 
 
 def get_runtime_base_url() -> str:
@@ -380,55 +383,105 @@ def process_and_index_document(
 # SIDEBAR: All Chats History, Ingestion & Settings
 # ---------------------------------------------------------
 with st.sidebar:
-    st.markdown("### 💬 All Chats History")
-    
-    # 1. New Chat Button
-    if st.button("➕ Start New Chat", use_container_width=True, key="btn_new_chat"):
+    st.markdown("### 💬 Chats")
+
+    # 1. Sleek ChatGPT/Gemini "+ New chat" Button
+    if st.button("➕ New chat", use_container_width=True, key="btn_new_chat"):
         new_id = str(uuid.uuid4())[:8]
         st.session_state.session_id = new_id
-        st.session_state.sessions[new_id] = "New Conversation"
+        st.session_state.sessions[new_id] = "New chat"
         st.session_state.chat_history = []
         st.session_state.documents = {}
         st.session_state.active_mindmap_idx = None
+        st.session_state.renaming_session_id = None
         if "share" in st.query_params:
             del st.query_params["share"]
         st.rerun()
 
-    # 2. List All Stored Sessions from Disk
+    # 2. ChatGPT/Gemini-Style Chronological Chat History List
     all_sessions = ChatHistoryManager.list_all_sessions()
     if all_sessions:
-        with st.expander(f"📁 Past Conversations ({len(all_sessions)})", expanded=True):
-            for s in all_sessions:
+        recency_groups = ChatHistoryManager.group_sessions_by_recency(all_sessions)
+        for group_name, group_sessions in recency_groups.items():
+            group_label = "📌 Pinned" if group_name == "Pinned" else group_name
+            st.caption(f"**{group_label}**")
+            for s in group_sessions:
                 s_id = s["session_id"]
-                s_title = s.get("title", f"Chat {s_id}")
-                s_date = s.get("updated_at", "")
-                s_count = s.get("message_count", 0)
+                s_title = s.get("title") or "New chat"
+                # Normalize any legacy 'Session' or 'Chat' generic labels
+                if s_title.startswith("Session") or (s_title.startswith("Chat ") and len(s_title) == 13):
+                    s_title = "Untitled chat"
+                s_pinned = s.get("pinned", False)
                 is_active = (s_id == st.session_state.session_id and not is_shared_view)
 
-                col_c1, col_c2 = st.columns([5, 1])
-                with col_c1:
-                    btn_label = f"{'👉 ' if is_active else '💬 '}{s_title[:20]}"
-                    if st.button(btn_label, key=f"sess_btn_{s_id}", help=f"Messages: {s_count} | Last active: {s_date}", use_container_width=True):
-                        loaded = ChatHistoryManager.load_session(s_id)
-                        if loaded:
-                            st.session_state.session_id = s_id
-                            st.session_state.sessions[s_id] = loaded.get("title", s_title)
-                            st.session_state.chat_history = loaded.get("chat_history", [])
-                            st.session_state.documents = loaded.get("documents", {})
-                            st.session_state.active_mindmap_idx = None
-                            if "share" in st.query_params:
-                                del st.query_params["share"]
+                # Inline Rename Input
+                if st.session_state.get("renaming_session_id") == s_id:
+                    with st.container():
+                        new_name = st.text_input(
+                            "Rename chat",
+                            value=s_title,
+                            key=f"rename_input_{s_id}",
+                            label_visibility="collapsed",
+                        )
+                        c_r1, c_r2 = st.columns(2)
+                        with c_r1:
+                            if st.button("✓ Save", key=f"save_r_{s_id}", use_container_width=True):
+                                if new_name.strip():
+                                    ChatHistoryManager.rename_session(s_id, new_name.strip())
+                                    st.session_state.sessions[s_id] = new_name.strip()
+                                st.session_state.renaming_session_id = None
+                                st.rerun()
+                        with c_r2:
+                            if st.button("✕ Cancel", key=f"cancel_r_{s_id}", use_container_width=True):
+                                st.session_state.renaming_session_id = None
+                                st.rerun()
+                else:
+                    col_main, col_pin, col_ren, col_del = st.columns([5.5, 1.2, 1.2, 1.2])
+                    with col_main:
+                        prefix = "📍 " if s_pinned else ("● " if is_active else "")
+                        short_title = (s_title[:20] + "...") if len(s_title) > 20 else s_title
+                        btn_label = f"{prefix}{short_title}"
+                        btn_type = "primary" if is_active else "secondary"
+                        if st.button(
+                            btn_label,
+                            key=f"sess_btn_{s_id}",
+                            type=btn_type,
+                            use_container_width=True,
+                            help=s_title,
+                        ):
+                            loaded = ChatHistoryManager.load_session(s_id)
+                            if loaded:
+                                st.session_state.session_id = s_id
+                                st.session_state.sessions[s_id] = loaded.get("title", s_title)
+                                st.session_state.chat_history = loaded.get("chat_history", [])
+                                st.session_state.documents = loaded.get("documents", {})
+                                st.session_state.active_mindmap_idx = None
+                                st.session_state.renaming_session_id = None
+                                if "share" in st.query_params:
+                                    del st.query_params["share"]
+                                st.rerun()
+                    with col_pin:
+                        pin_icon = "📍" if s_pinned else "📌"
+                        pin_help = "Unpin chat" if s_pinned else "Pin chat to top"
+                        if st.button(pin_icon, key=f"pin_{s_id}", help=pin_help):
+                            ChatHistoryManager.pin_session(s_id)
                             st.rerun()
-                with col_c2:
-                    if st.button("🗑️", key=f"del_s_{s_id}", help="Delete chat"):
-                        ChatHistoryManager.delete_session(s_id)
-                        if s_id == st.session_state.session_id:
-                            st.session_state.session_id = str(uuid.uuid4())[:8]
-                            st.session_state.chat_history = []
-                            st.session_state.documents = {}
-                        st.rerun()
+                    with col_ren:
+                        if st.button("✏️", key=f"edit_{s_id}", help="Rename chat"):
+                            st.session_state.renaming_session_id = s_id
+                            st.rerun()
+                    with col_del:
+                        if st.button("🗑️", key=f"del_s_{s_id}", help="Delete chat"):
+                            ChatHistoryManager.delete_session(s_id)
+                            if s_id == st.session_state.session_id:
+                                new_id = str(uuid.uuid4())[:8]
+                                st.session_state.session_id = new_id
+                                st.session_state.sessions[new_id] = "New chat"
+                                st.session_state.chat_history = []
+                                st.session_state.documents = {}
+                            st.rerun()
     else:
-        st.caption("No saved chats yet. Ask a question to start your first chat!")
+        st.caption("No chats yet. Ask a question to start your first chat!")
 
     st.markdown("---")
 
@@ -439,48 +492,67 @@ with st.sidebar:
     # Tab 1: PDF Upload (Digital + Scanned)
     with tab_pdf:
         uploaded_pdf = st.file_uploader("Upload PDF (max 50MB)", type=["pdf"], key="pdf_uploader")
-        if uploaded_pdf and st.button("Index PDF", key="btn_pdf", use_container_width=True):
-            loader = PDFLoader(session_id=st.session_state.session_id)
-            process_and_index_document(loader.load, uploaded_pdf, uploaded_pdf.name, "pdf")
-            st.rerun()
+        if uploaded_pdf:
+            st.caption(f"📄 **{uploaded_pdf.name}** ({len(uploaded_pdf.getvalue()) / 1024:.1f} KB)")
+            if st.button("📥 Index PDF", key="btn_pdf", use_container_width=True):
+                loader = PDFLoader(session_id=st.session_state.session_id)
+                success = process_and_index_document(loader.load, uploaded_pdf, uploaded_pdf.name, "pdf")
+                if success:
+                    st.rerun()
 
-    # Tab 2: URL Scraper
+    # Tab 2: URL Scraper (Form with Enter-Key submission & Auto-HTTPS)
     with tab_url:
-        url_input = st.text_input("Web URL (HTTP/HTTPS)", placeholder="https://example.com/article", key="url_input")
-        if url_input and st.button("Ingest Webpage", key="btn_url", use_container_width=True):
-            loader = URLLoader(session_id=st.session_state.session_id)
-            process_and_index_document(loader.load, url_input, url_input, "url")
-            st.rerun()
+        with st.form("url_ingest_form", clear_on_submit=False):
+            url_input = st.text_input(
+                "Web URL (HTTP/HTTPS)",
+                placeholder="https://example.com/article",
+                key="url_input",
+                help="Paste any website link (e.g. example.com or https://wikipedia.org)",
+            )
+            submit_url = st.form_submit_button("🌐 Ingest Webpage", use_container_width=True)
+            if submit_url and url_input.strip():
+                clean_url = url_input.strip()
+                loader = URLLoader(session_id=st.session_state.session_id)
+                success = process_and_index_document(loader.load, clean_url, clean_url, "url")
+                if success:
+                    st.rerun()
 
     # Tab 3: YouTube Transcript
     with tab_yt:
-        yt_input = st.text_input("YouTube Link", placeholder="https://youtube.com/watch?v=...", key="yt_input")
-        if yt_input and st.button("Ingest YouTube Video", key="btn_yt", use_container_width=True):
-            loader = YouTubeLoader(session_id=st.session_state.session_id)
-            process_and_index_document(loader.load, yt_input, yt_input, "youtube")
-            st.rerun()
+        with st.form("yt_ingest_form", clear_on_submit=False):
+            yt_input = st.text_input("YouTube Link", placeholder="https://youtube.com/watch?v=...", key="yt_input")
+            submit_yt = st.form_submit_button("🎥 Ingest YouTube Video", use_container_width=True)
+            if submit_yt and yt_input.strip():
+                clean_yt = yt_input.strip()
+                loader = YouTubeLoader(session_id=st.session_state.session_id)
+                success = process_and_index_document(loader.load, clean_yt, clean_yt, "youtube")
+                if success:
+                    st.rerun()
 
     # Tab 4: Image OCR (Tesseract + Windows Native WinOCR)
     with tab_img:
         img_upload = st.file_uploader("Upload Image or Diagram", type=["png", "jpg", "jpeg", "webp"], key="img_uploader")
+        if img_upload:
+            st.image(img_upload, caption=img_upload.name, use_container_width=True)
         ocr_lang = st.selectbox("OCR Language", ["eng", "hin", "kan", "tam", "tel"], format_func=lambda x: {
             "eng": "English", "hin": "Hindi", "kan": "Kannada", "tam": "Tamil", "tel": "Telugu"
         }.get(x, x))
-        if img_upload and st.button("Extract via OCR", key="btn_img", use_container_width=True):
+        if img_upload and st.button("🖼️ Index Image", key="btn_img", use_container_width=True):
             loader = ImageLoader(session_id=st.session_state.session_id)
-            process_and_index_document(loader.load, img_upload, img_upload.name, "image", extra_kwargs={"ocr_lang": ocr_lang})
-            st.rerun()
+            success = process_and_index_document(loader.load, img_upload, img_upload.name, "image", extra_kwargs={"ocr_lang": ocr_lang})
+            if success:
+                st.rerun()
 
     # Tab 5: Notes / Plain Text
     with tab_notes:
         notes_upload = st.file_uploader("Upload Text (.txt, .md)", type=["txt", "md", "csv"], key="notes_uploader")
         pasted_text = st.text_area("Or Paste Notes directly", placeholder="Paste text here...", height=100)
-        if st.button("Ingest Notes", key="btn_notes", use_container_width=True):
+        if st.button("📝 Ingest Notes", key="btn_notes", use_container_width=True):
             loader = NotesLoader(session_id=st.session_state.session_id)
             if notes_upload:
-                process_and_index_document(loader.load, notes_upload, notes_upload.name, "notes")
+                success = process_and_index_document(loader.load, notes_upload, notes_upload.name, "notes")
             elif pasted_text.strip():
-                process_and_index_document(loader.load, pasted_text, "pasted_note.txt", "notes")
+                success = process_and_index_document(loader.load, pasted_text, "pasted_note.txt", "notes")
             st.rerun()
 
     # 4. Document Manager
@@ -830,12 +902,35 @@ for msg_idx, msg in enumerate(active_messages):
 
 
 # ---------------------------------------------------------
-# INPUT SECTION: Clean Text Chat Only (Voice Input Removed)
+# INPUT SECTION: Clean Text Chat with Quick File/Image Attachment
 # ---------------------------------------------------------
 user_query = ""
 
 # Only show chat input when in interactive mode (not read-only shared view)
 if not is_shared_view:
+    with st.expander("📎 Attach Image or Document to this chat (PNG, JPG, PDF, TXT)", expanded=False):
+        c_att1, c_att2 = st.columns([4, 1])
+        with c_att1:
+            chat_att = st.file_uploader(
+                "Upload Image or Document",
+                type=["pdf", "png", "jpg", "jpeg", "webp", "txt", "md"],
+                key="chat_inline_attachment",
+                label_visibility="collapsed",
+            )
+        with c_att2:
+            if chat_att and st.button("📥 Attach", key="btn_chat_inline_index", use_container_width=True):
+                ext = os.path.splitext(chat_att.name.lower())[1]
+                if ext == ".pdf":
+                    ldr = PDFLoader(session_id=st.session_state.session_id)
+                    process_and_index_document(ldr.load, chat_att, chat_att.name, "pdf")
+                elif ext in {".png", ".jpg", ".jpeg", ".webp"}:
+                    ldr = ImageLoader(session_id=st.session_state.session_id)
+                    process_and_index_document(ldr.load, chat_att, chat_att.name, "image")
+                else:
+                    ldr = NotesLoader(session_id=st.session_state.session_id)
+                    process_and_index_document(ldr.load, chat_att, chat_att.name, "notes")
+                st.rerun()
+
     text_query = st.chat_input("Ask anything across your uploaded PDFs, URLs, videos, images, and notes...")
     if text_query:
         user_query = text_query
@@ -950,8 +1045,19 @@ if user_query and not is_shared_view:
                 "is_combined_search": is_combined_search,
             })
 
-            # Auto-save session permanently to disk
-            current_title = st.session_state.sessions.get(st.session_state.session_id, user_query[:35])
+            # Auto-save session permanently to disk with meaningful title
+            current_title = st.session_state.sessions.get(st.session_state.session_id, "")
+            is_default = (
+                not current_title
+                or current_title in {"New chat", "New Conversation", "Default Workspace", "Research Workspace"}
+                or current_title.startswith("Session")
+                or (current_title.startswith("Chat ") and len(current_title) == 13)
+            )
+            if is_default:
+                clean_q = user_query.strip()
+                current_title = clean_q[:32] + ("..." if len(clean_q) > 32 else "")
+                st.session_state.sessions[st.session_state.session_id] = current_title
+
             ChatHistoryManager.save_session(
                 session_id=st.session_state.session_id,
                 title=current_title,

@@ -76,6 +76,7 @@ class ChatHistoryManager:
         title: str,
         chat_history: List[Dict[str, Any]],
         documents: Optional[Dict[str, Any]] = None,
+        pinned: Optional[bool] = None,
     ) -> None:
         """Saves or updates a chat session on disk and updates the index."""
         _ensure_dirs()
@@ -84,13 +85,21 @@ class ChatHistoryManager:
 
         existing_meta = index.get(session_id, {})
         created_at = existing_meta.get("created_at", now_iso)
+        is_pinned = existing_meta.get("pinned", False) if pinned is None else pinned
 
-        # Derive auto-title from first user message if title is default
+        # Derive auto-title from first user message if title is generic
         auto_title = title
-        if (not title or title.startswith("Session") or title == "Default Workspace") and chat_history:
+        is_generic_title = (
+            not title
+            or title.startswith("Session")
+            or title.startswith("Chat ")
+            or title in {"New Conversation", "Default Workspace", "Research Workspace"}
+        )
+        if is_generic_title and chat_history:
             first_user_msg = next((m["content"] for m in chat_history if m.get("role") == "user"), None)
             if first_user_msg:
-                auto_title = first_user_msg.strip()[:35] + ("..." if len(first_user_msg.strip()) > 35 else "")
+                clean_q = first_user_msg.strip()
+                auto_title = clean_q[:35] + ("..." if len(clean_q) > 35 else "")
 
         # Snippet preview from latest assistant message
         preview = ""
@@ -105,6 +114,7 @@ class ChatHistoryManager:
             "title": auto_title,
             "created_at": created_at,
             "updated_at": now_iso,
+            "pinned": is_pinned,
             "message_count": len(chat_history),
             "chat_history": chat_history,
             "documents": documents or {},
@@ -124,10 +134,121 @@ class ChatHistoryManager:
             "title": auto_title,
             "created_at": created_at,
             "updated_at": now_iso,
+            "pinned": is_pinned,
             "message_count": len(chat_history),
             "preview": preview,
         }
         _save_index(index)
+
+    @staticmethod
+    def pin_session(session_id: str, pinned: Optional[bool] = None) -> bool:
+        """Toggles or sets the pinned state of a session."""
+        _ensure_dirs()
+        index = _load_index()
+        if session_id not in index:
+            return False
+
+        current = index[session_id].get("pinned", False)
+        new_val = not current if pinned is None else pinned
+        index[session_id]["pinned"] = new_val
+        _save_index(index)
+
+        # Update session json
+        session_file = os.path.join(SESSIONS_DIR, f"{session_id}.json")
+        if os.path.exists(session_file):
+            try:
+                with open(session_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                data["pinned"] = new_val
+                with open(session_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+            except Exception as e:
+                logger.warning("Could not persist pinned status to session file: %s", e)
+        return new_val
+
+    @staticmethod
+    def rename_session(session_id: str, new_title: str) -> bool:
+        """Renames a session in both the index and file."""
+        _ensure_dirs()
+        clean_title = new_title.strip()
+        if not clean_title:
+            return False
+
+        index = _load_index()
+        if session_id in index:
+            index[session_id]["title"] = clean_title
+            _save_index(index)
+
+        session_file = os.path.join(SESSIONS_DIR, f"{session_id}.json")
+        if os.path.exists(session_file):
+            try:
+                with open(session_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                data["title"] = clean_title
+                with open(session_file, "w", encoding="utf-8") as f:
+                    json.dump(data, f, indent=2, ensure_ascii=False)
+                return True
+            except Exception as e:
+                logger.error("Failed to rename session file %s: %s", session_id, e)
+                return False
+        return False
+
+    @staticmethod
+    def group_sessions_by_recency(sessions: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """Categorizes sessions into ChatGPT/Gemini-style recency groups:
+        Pinned, Today, Yesterday, Previous 7 Days, Previous 30 Days, and Older.
+        """
+        from datetime import date, timedelta
+
+        pinned_group = []
+        today_group = []
+        yesterday_group = []
+        last_7_days = []
+        last_30_days = []
+        older_group = []
+
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        seven_days_ago = today - timedelta(days=7)
+        thirty_days_ago = today - timedelta(days=30)
+
+        for s in sessions:
+            if s.get("pinned", False):
+                pinned_group.append(s)
+                continue
+
+            updated_str = s.get("updated_at", "")
+            try:
+                s_date = datetime.strptime(updated_str.split()[0], "%Y-%m-%d").date()
+            except Exception:
+                s_date = today
+
+            if s_date == today:
+                today_group.append(s)
+            elif s_date == yesterday:
+                yesterday_group.append(s)
+            elif s_date >= seven_days_ago:
+                last_7_days.append(s)
+            elif s_date >= thirty_days_ago:
+                last_30_days.append(s)
+            else:
+                older_group.append(s)
+
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        if pinned_group:
+            groups["Pinned"] = pinned_group
+        if today_group:
+            groups["Today"] = today_group
+        if yesterday_group:
+            groups["Yesterday"] = yesterday_group
+        if last_7_days:
+            groups["Previous 7 Days"] = last_7_days
+        if last_30_days:
+            groups["Previous 30 Days"] = last_30_days
+        if older_group:
+            groups["Older"] = older_group
+
+        return groups
 
     @staticmethod
     def delete_session(session_id: str) -> bool:

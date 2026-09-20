@@ -182,12 +182,12 @@ class RAGEngine:
 
         # Trigger auto web search if:
         # 1. No local chunks met threshold, OR
-        # 2. Maximum similarity < 0.50 (information score < 50%), OR
-        # 3. Average similarity < 0.50
-        needs_web_search = (not relevant_chunks) or (max_similarity < 0.50) or (avg_similarity < 0.50)
+        # 2. Maximum similarity < 0.75 (information score < 75%), OR
+        # 3. Average similarity < 0.75
+        needs_web_search = (not relevant_chunks) or (max_similarity < 0.75) or (avg_similarity < 0.75)
 
         if needs_web_search and enable_web_fallback:
-            logger.info("Local evidence score/relevance insufficient (max=%.2f, avg=%.2f). Auto-triggering live Web Search for '%s'", max_similarity, avg_similarity, standalone_query)
+            logger.info("Local evidence score/relevance insufficient (max=%.2f, avg=%.2f < 0.75). Auto-triggering live Web Search for '%s'", max_similarity, avg_similarity, standalone_query)
             web_hits = WebSearchRetriever.search(standalone_query, max_results=4)
             if web_hits:
                 web_chunks = WebSearchRetriever.convert_to_chunks(web_hits, session_id)

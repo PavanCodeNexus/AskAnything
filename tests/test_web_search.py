@@ -121,6 +121,43 @@ class TestWebSearchRetriever(unittest.TestCase):
             citation_sources = [c.get("source_type") for c in res["citations"]]
             self.assertIn("web", citation_sources)
 
+    def test_score_below_75_triggers_web_search(self):
+        # Local chunk has moderate relevance (0.62) which is below the 75% threshold
+        local_chunk = DocumentChunk(
+            chunk_id="local_chunk_mod",
+            document_id="doc_pdf_mod",
+            session_id="test_session_75",
+            text="Machine learning models require training datasets.",
+            source_type="pdf",
+            filename="ml_guide.pdf",
+            page_number=1,
+        )
+        mock_vs = MagicMock(spec=HybridVectorStore)
+        mock_vs.hybrid_search.return_value = [(local_chunk, 0.62)]
+        mock_vs.get_session_overview_chunks.return_value = []
+
+        fake_web_hit = [
+            {
+                "title": "Deep Learning Foundation Models - Nature",
+                "link": "https://nature.com/articles/foundation-models",
+                "snippet": "Foundation models transform modern artificial intelligence.",
+                "source": "Nature AI",
+            }
+        ]
+
+        with patch.object(WebSearchRetriever, "search", return_value=fake_web_hit):
+            engine = RAGEngine(vectorstore=mock_vs, api_key=None)
+            res = engine.answer_query(
+                session_id="test_session_75",
+                user_query="What are foundation models?",
+                enable_web_fallback=True,
+            )
+
+            # Score 0.62 < 0.75 MUST trigger web search and produce combined answer
+            self.assertTrue(res["is_web_search"])
+            self.assertTrue(res["is_combined_search"])
+            self.assertEqual(len(res["raw_chunks"]), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

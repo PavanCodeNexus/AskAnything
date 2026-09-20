@@ -1,4 +1,5 @@
 """Web URL loader with SSRF protection, sanitization, and structured article extraction."""
+import re
 from typing import Any, Callable, Dict, List, Optional
 import urllib.parse
 import uuid
@@ -37,6 +38,9 @@ class URLLoader(BaseLoader):
         """
         doc_id = str(uuid.uuid4())
         raw_url = str(source).strip()
+        # Automatically prepend https:// if scheme is missing
+        if raw_url and not re.match(r"^https?://", raw_url, re.IGNORECASE):
+            raw_url = f"https://{raw_url}"
 
         def update_status(status: ProcessingStatus, msg: str) -> None:
             if status_callback:
