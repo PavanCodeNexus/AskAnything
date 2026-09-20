@@ -265,3 +265,16 @@ class ImageLoader(BaseLoader):
             status=ProcessingStatus.READY,
             status_message=f"OCR extracted {len(elements)} blocks ({len(clean_text)} chars).",
         )
+
+
+def __getattr__(name: str):
+    """Module-level attribute getter for backwards compatibility."""
+    if name == "HAS_WINOCR":
+        return is_winocr_available()
+    if name == "winocr":
+        try:
+            import winocr
+            return winocr
+        except Exception:
+            return None
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

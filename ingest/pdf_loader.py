@@ -97,7 +97,7 @@ class PDFLoader(BaseLoader):
         try:
             import io
             from PIL import Image
-            from ingest.image_loader import HAS_WINOCR, winocr, get_winocr_language_tag, configure_tesseract_path
+            from ingest.image_loader import is_winocr_available, get_winocr_language_tag, configure_tesseract_path
             import pytesseract
 
             with fitz.open(stream=file_bytes, filetype="pdf") as pdf:
@@ -152,8 +152,9 @@ class PDFLoader(BaseLoader):
                                     ocr_text = pytesseract.image_to_string(page_img, lang="eng")
                                 except Exception:
                                     pass
-                            if not ocr_text.strip() and HAS_WINOCR and winocr:
+                            if not ocr_text.strip() and is_winocr_available():
                                 try:
+                                    import winocr
                                     win_res = winocr.recognize_pil_sync(page_img, "en-US")
                                     if isinstance(win_res, dict):
                                         ocr_text = win_res.get("text", "")
