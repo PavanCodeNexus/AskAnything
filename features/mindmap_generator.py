@@ -45,6 +45,15 @@ Rules:
 """
 
 
+def _get_chunk_str(chunk: Any, field: str, default: str = "") -> str:
+    """Extracts a string property safely whether chunk is a DocumentChunk or dict."""
+    if isinstance(chunk, dict):
+        val = chunk.get(field, default)
+    else:
+        val = getattr(chunk, field, default)
+    return str(val or default)
+
+
 class MindMapGenerator:
     """Extracts concept entities and renders a unique handwritten-style SVG Mind Map with explanations."""
 
@@ -66,11 +75,11 @@ class MindMapGenerator:
                 except Exception as e:
                     logger.warning("Could not initialize Groq for MindMapGenerator on %s: %s", cand, e)
 
-    def generate_graph_data(self, query: str, answer: str, chunks: List[DocumentChunk]) -> Dict[str, List[Dict[str, str]]]:
+    def generate_graph_data(self, query: str, answer: str, chunks: List[Any]) -> Dict[str, List[Dict[str, str]]]:
         """Extracts concept nodes and handwritten explanations from the Q&A context."""
         if self.llm is not None:
             try:
-                excerpt_text = "\n".join([f"- {c.text[:220]}" for c in chunks[:5]])
+                excerpt_text = "\n".join([f"- {_get_chunk_str(c, 'text')[:220]}" for c in chunks[:5]])
                 prompt = (
                     f"User Query: {query}\n\n"
                     f"Synthesized Answer: {answer[:500]}\n\n"
@@ -93,7 +102,7 @@ class MindMapGenerator:
 
         return self._heuristic_graph(query, answer, chunks)
 
-    def _heuristic_graph(self, query: str, answer: str, chunks: List[DocumentChunk]) -> Dict[str, List[Dict[str, str]]]:
+    def _heuristic_graph(self, query: str, answer: str, chunks: List[Any]) -> Dict[str, List[Dict[str, str]]]:
         """Creates an educational concept graph with handwritten explanations when LLM is unavailable."""
         center_label = query.strip("? .")[:26]
         nodes = [{
@@ -131,15 +140,19 @@ class MindMapGenerator:
             edges.append({"from": "root", "to": node_id, "label": "relates to"})
 
         for c_idx, c in enumerate(chunks[:2]):
-            doc_label = c.filename or c.title or c.source_type or f"Source {c_idx+1}"
+            c_fn = _get_chunk_str(c, "filename")
+            c_title = _get_chunk_str(c, "title")
+            c_src = _get_chunk_str(c, "source_type", "Source")
+            c_txt = _get_chunk_str(c, "text")
+            doc_label = c_fn or c_title or c_src or f"Source {c_idx+1}"
             doc_id = f"src_{c_idx+1}"
-            clean_excerpt = c.text[:95].replace("\n", " ").strip()
+            clean_excerpt = c_txt[:95].replace("\n", " ").strip()
             nodes.append({
                 "id": doc_id,
                 "label": doc_label[:22],
                 "group": "Organization",
-                "explanation": f"Primary grounding source ({c.source_type}): '{clean_excerpt}...'",
-                "takeaway": f"Verified Citation [{c.source_type}]",
+                "explanation": f"Primary grounding source ({c_src}): '{clean_excerpt}...'",
+                "takeaway": f"Verified Citation [{c_src}]",
             })
             edges.append({"from": "root", "to": doc_id, "label": "cites"})
 

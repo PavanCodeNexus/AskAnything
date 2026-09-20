@@ -22,6 +22,60 @@ def _ensure_dirs() -> None:
     os.makedirs(SHARED_DIR, exist_ok=True)
 
 
+def _clean_chunk(chunk: Any) -> Dict[str, Any]:
+    """Converts a DocumentChunk (Pydantic model or object) or dict into a JSON-serializable dictionary."""
+    if hasattr(chunk, "model_dump"):
+        return chunk.model_dump()
+    if hasattr(chunk, "dict"):
+        return chunk.dict()
+    if isinstance(chunk, dict):
+        return {k: str(v) if isinstance(v, (bytes, bytearray)) else v for k, v in chunk.items()}
+    return {"text": str(chunk)}
+
+
+def _clean_message_for_storage(msg: Dict[str, Any]) -> Dict[str, Any]:
+    """Cleans a single chat message before JSON persistence.
+
+    Removes raw audio_bytes, converts DocumentChunk instances in raw_chunks into serializable dicts,
+    and handles complex Pydantic models.
+    """
+    clean_msg: Dict[str, Any] = {}
+    for k, v in msg.items():
+        if k == "audio_bytes":
+            # Exclude large binary audio payload from persistent JSON
+            continue
+        elif k == "raw_chunks" and isinstance(v, list):
+            clean_msg[k] = [_clean_chunk(c) for c in v]
+        elif isinstance(v, (bytes, bytearray)):
+            continue
+        elif hasattr(v, "model_dump"):
+            clean_msg[k] = v.model_dump()
+        elif hasattr(v, "dict"):
+            clean_msg[k] = v.dict()
+        else:
+            clean_msg[k] = v
+    return clean_msg
+
+
+def _atomic_write_json(filepath: str, data: Any) -> None:
+    """Writes data to a temporary file first, then atomically replaces target."""
+    _ensure_dirs()
+    temp_filepath = f"{filepath}.tmp_{uuid.uuid4().hex[:6]}"
+    try:
+        with open(temp_filepath, "w", encoding="utf-8") as f:
+            json.dump(data, f, default=str, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_filepath, filepath)
+    except Exception as e:
+        if os.path.exists(temp_filepath):
+            try:
+                os.remove(temp_filepath)
+            except Exception:
+                pass
+        raise e
+
+
 def _load_index() -> Dict[str, Dict[str, Any]]:
     """Loads sessions metadata index."""
     _ensure_dirs()
@@ -36,11 +90,10 @@ def _load_index() -> Dict[str, Dict[str, Any]]:
 
 
 def _save_index(index_data: Dict[str, Dict[str, Any]]) -> None:
-    """Saves sessions metadata index."""
+    """Saves sessions metadata index atomically."""
     _ensure_dirs()
     try:
-        with open(INDEX_FILE, "w", encoding="utf-8") as f:
-            json.dump(index_data, f, indent=2, ensure_ascii=False)
+        _atomic_write_json(INDEX_FILE, index_data)
     except Exception as e:
         logger.error("Failed to save sessions index: %s", e)
 
@@ -58,7 +111,7 @@ class ChatHistoryManager:
 
     @staticmethod
     def load_session(session_id: str) -> Optional[Dict[str, Any]]:
-        """Loads a session's full chat history and documents from disk."""
+        """Loads a session's full chat history and documents from disk with auto-quarantine for corrupted files."""
         _ensure_dirs()
         filepath = os.path.join(SESSIONS_DIR, f"{session_id}.json")
         if not os.path.exists(filepath):
@@ -67,7 +120,16 @@ class ChatHistoryManager:
             with open(filepath, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            logger.error("Failed to load session %s: %s", session_id, e)
+            logger.error("Failed to load session %s: %s. Quarantining corrupted file.", session_id, e)
+            try:
+                corrupt_path = f"{filepath}.corrupt_{uuid.uuid4().hex[:4]}"
+                shutil.move(filepath, corrupt_path)
+                index = _load_index()
+                if session_id in index:
+                    del index[session_id]
+                    _save_index(index)
+            except Exception as q_err:
+                logger.warning("Failed to auto-quarantine corrupted session %s: %s", filepath, q_err)
             return None
 
     @staticmethod
@@ -78,7 +140,7 @@ class ChatHistoryManager:
         documents: Optional[Dict[str, Any]] = None,
         pinned: Optional[bool] = None,
     ) -> None:
-        """Saves or updates a chat session on disk and updates the index."""
+        """Saves or updates a chat session on disk atomically and updates the index."""
         _ensure_dirs()
         now_iso = datetime.now().strftime("%Y-%m-%d %H:%M")
         index = _load_index()
@@ -108,6 +170,9 @@ class ChatHistoryManager:
             content = last_msg.get("content", "")
             preview = (content[:60] + "...") if len(content) > 60 else content
 
+        # Clean messages to sanitize DocumentChunk models and strip raw audio bytes
+        clean_history = [_clean_message_for_storage(m) for m in chat_history]
+
         # Save session payload
         payload = {
             "session_id": session_id,
@@ -116,14 +181,13 @@ class ChatHistoryManager:
             "updated_at": now_iso,
             "pinned": is_pinned,
             "message_count": len(chat_history),
-            "chat_history": chat_history,
+            "chat_history": clean_history,
             "documents": documents or {},
         }
 
         filepath = os.path.join(SESSIONS_DIR, f"{session_id}.json")
         try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                json.dump(payload, f, indent=2, ensure_ascii=False)
+            _atomic_write_json(filepath, payload)
         except Exception as e:
             logger.error("Failed to write session file for %s: %s", session_id, e)
             return
@@ -160,8 +224,7 @@ class ChatHistoryManager:
                 with open(session_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 data["pinned"] = new_val
-                with open(session_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
+                _atomic_write_json(session_file, data)
             except Exception as e:
                 logger.warning("Could not persist pinned status to session file: %s", e)
         return new_val
@@ -185,8 +248,7 @@ class ChatHistoryManager:
                 with open(session_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 data["title"] = clean_title
-                with open(session_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2, ensure_ascii=False)
+                _atomic_write_json(session_file, data)
                 return True
             except Exception as e:
                 logger.error("Failed to rename session file %s: %s", session_id, e)
@@ -281,11 +343,8 @@ class ChatHistoryManager:
         share_id = f"ask_{uuid.uuid4().hex[:8]}"
         now_iso = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # Strip internal memory items (e.g. raw audio bytes) to keep payload clean & fast
-        clean_history = []
-        for msg in chat_history:
-            m_copy = {k: v for k, v in msg.items() if k != "audio_bytes"}
-            clean_history.append(m_copy)
+        # Sanitize chat history for sharing (strip audio bytes, convert chunk models)
+        clean_history = [_clean_message_for_storage(m) for m in chat_history]
 
         share_data = {
             "share_id": share_id,
@@ -298,8 +357,7 @@ class ChatHistoryManager:
 
         share_file = os.path.join(SHARED_DIR, f"{share_id}.json")
         try:
-            with open(share_file, "w", encoding="utf-8") as f:
-                json.dump(share_data, f, indent=2, ensure_ascii=False)
+            _atomic_write_json(share_file, share_data)
             logger.info("Created share snapshot: %s", share_id)
             return share_id
         except Exception as e:

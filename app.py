@@ -273,15 +273,23 @@ if share_id_param:
 
 # Session State Management
 if "session_id" not in st.session_state:
-    # Try loading most recent past session or start new
+    # Try loading most recent valid past session or start new
     saved_sessions = ChatHistoryManager.list_all_sessions()
+    loaded_session = None
     if saved_sessions and not is_shared_view:
-        latest = saved_sessions[0]
-        st.session_state.session_id = latest["session_id"]
-        loaded = ChatHistoryManager.load_session(latest["session_id"])
-        st.session_state.chat_history = loaded.get("chat_history", []) if loaded else []
-        st.session_state.documents = loaded.get("documents", {}) if loaded else {}
-    else:
+        for sess_meta in saved_sessions:
+            sess_id = sess_meta.get("session_id")
+            if not sess_id:
+                continue
+            loaded = ChatHistoryManager.load_session(sess_id)
+            if loaded is not None:
+                st.session_state.session_id = sess_id
+                st.session_state.chat_history = loaded.get("chat_history", [])
+                st.session_state.documents = loaded.get("documents", {})
+                loaded_session = loaded
+                break
+
+    if not loaded_session and not is_shared_view:
         st.session_state.session_id = str(uuid.uuid4())[:8]
         st.session_state.chat_history = []
         st.session_state.documents = {}
