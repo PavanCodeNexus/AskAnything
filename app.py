@@ -53,6 +53,15 @@ from vectorstore import HybridVectorStore
 load_dotenv()
 logger = setup_logger("app")
 
+# Synchronize Streamlit Secrets into os.environ for Streamlit Community Cloud
+try:
+    if hasattr(st, "secrets"):
+        for sec_k, sec_v in st.secrets.items():
+            if isinstance(sec_v, str) and sec_k not in os.environ:
+                os.environ[sec_k] = sec_v
+except Exception:
+    pass
+
 # Page Configuration
 st.set_page_config(
     page_title="AskAnything — Multimodal RAG Assistant",
