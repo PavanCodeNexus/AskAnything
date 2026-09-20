@@ -42,18 +42,19 @@ def configure_tesseract_path() -> bool:
     return False
 
 
-try:
-    import winocr
-    HAS_WINOCR = True
-except ImportError:
-    winocr = None
-    HAS_WINOCR = False
+def is_winocr_available() -> bool:
+    """Checks if Windows native OCR is available without permanently binding early."""
+    try:
+        import winocr  # noqa: F401
+        return True
+    except Exception:
+        return False
+
 
 def get_winocr_language_tag(lang_code: str = "eng") -> Optional[str]:
     """Finds best matching Windows OCR language tag."""
-    if not HAS_WINOCR:
-        return None
     try:
+        import winocr
         available = [l.language_tag for l in winocr.OcrEngine.available_recognizer_languages]
         if not available:
             return None
@@ -80,7 +81,10 @@ class ImageLoader(BaseLoader):
     def __init__(self, session_id: str):
         super().__init__(session_id)
         self.tesseract_configured = configure_tesseract_path()
-        self.has_winocr = HAS_WINOCR
+
+    @property
+    def has_winocr(self) -> bool:
+        return is_winocr_available()
 
     def load(
         self,
@@ -193,8 +197,9 @@ class ImageLoader(BaseLoader):
                     logger.warning("Tesseract failed on %s: %s; falling back to WinOCR", safe_filename, tess_err)
 
             # Fallback to Windows native WinOCR if Tesseract was absent or yielded empty text
-            if not extracted_text.strip() and self.has_winocr and winocr:
+            if not extracted_text.strip() and self.has_winocr:
                 try:
+                    import winocr
                     win_tag = get_winocr_language_tag(ocr_lang) or "en-US"
                     win_result = winocr.recognize_pil_sync(image_obj, win_tag)
                     if isinstance(win_result, dict):

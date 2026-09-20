@@ -42,3 +42,7 @@ models/
 
 # Local chat storage & shared conversations
 chat_storage/
+
+# IDE & agent cache
+.agents/
+.claude/
