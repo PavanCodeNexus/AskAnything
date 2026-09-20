@@ -271,6 +271,20 @@ if "enable_web_search" not in st.session_state:
     st.session_state.enable_web_search = True
 
 
+def get_runtime_base_url() -> str:
+    """Dynamically resolves the active browser base URL for sharing."""
+    try:
+        if hasattr(st, "context") and hasattr(st.context, "headers"):
+            headers = st.context.headers or {}
+            host = headers.get("x-forwarded-host") or headers.get("host")
+            if host:
+                proto = headers.get("x-forwarded-proto", "https" if not ("localhost" in host or "127.0.0.1" in host) else "http")
+                return f"{proto}://{host}"
+    except Exception:
+        pass
+    return os.getenv("APP_BASE_URL", "http://localhost:8501")
+
+
 def process_and_index_document(
     loader_func,
     source_payload: Any,
@@ -358,8 +372,6 @@ def process_and_index_document(
         status_text_slot.error(f"❌ Pipeline error: {str(e)}")
         return False
     finally:
-        import time
-        time.sleep(1.2)
         progress_slot.empty()
         status_text_slot.empty()
 
@@ -540,7 +552,14 @@ with st.sidebar:
 # ---------------------------------------------------------
 
 # Shared View Handler
-if is_shared_view and shared_data:
+if share_id_param and not shared_data:
+    st.error(f"⚠️ Shared conversation link '{html.escape(str(share_id_param))}' was not found or has expired.")
+    if st.button("← Return to My Workspace", key="btn_return_invalid_share"):
+        if "share" in st.query_params:
+            del st.query_params["share"]
+        st.rerun()
+    active_messages = []
+elif is_shared_view and shared_data:
     st.markdown(
         f"""
         <div class="shared-banner">
@@ -567,11 +586,13 @@ if is_shared_view and shared_data:
                 chat_history=st.session_state.chat_history,
                 documents=st.session_state.documents,
             )
-            del st.query_params["share"]
+            if "share" in st.query_params:
+                del st.query_params["share"]
             st.rerun()
     with col_sh2:
         if st.button("← Back to My Workspace", use_container_width=True):
-            del st.query_params["share"]
+            if "share" in st.query_params:
+                del st.query_params["share"]
             st.rerun()
 
     active_messages = shared_data.get("chat_history", [])
@@ -593,10 +614,52 @@ else:
                     chat_history=st.session_state.chat_history,
                     documents=st.session_state.documents,
                 )
-                share_url = f"http://localhost:8501/?share={share_id}"
+                runtime_base = get_runtime_base_url()
+                share_url = f"{runtime_base}/?share={share_id}"
 
                 st.markdown("### 🔗 Share this Conversation")
-                st.text_input("Public Share Link:", value=share_url, key="share_url_input")
+
+                # 1-Click Client-Side Clipboard Copy Button
+                copy_html = f"""
+                <button id="copy-share-btn" onclick="
+                    const urlToCopy = (window.location.origin && !window.location.origin.includes('undefined')) 
+                        ? (window.location.origin + window.location.pathname + '?share={share_id}') 
+                        : '{share_url}';
+                    navigator.clipboard.writeText(urlToCopy).then(() => {{
+                        const b = document.getElementById('copy-share-btn');
+                        b.innerText = '✅ Link Copied to Clipboard!';
+                        b.style.backgroundColor = '#16A34A';
+                        setTimeout(() => {{
+                            b.innerText = '📋 Copy Share Link';
+                            b.style.backgroundColor = '#6366F1';
+                        }}, 2500);
+                    }}).catch(() => {{
+                        prompt('Copy link:', urlToCopy);
+                    }});
+                " style="
+                    width: 100%;
+                    background-color: #6366F1;
+                    color: white;
+                    border: none;
+                    padding: 10px 14px;
+                    border-radius: 8px;
+                    font-weight: 600;
+                    font-size: 14px;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                    margin-bottom: 10px;
+                    font-family: inherit;
+                    transition: background-color 0.2s ease;
+                ">
+                    📋 Copy Share Link
+                </button>
+                """
+                st.components.v1.html(copy_html, height=52)
+
+                st.text_input("Direct Public Link:", value=share_url, key="share_url_input")
 
                 # WhatsApp Share Link
                 wa_message = f"Check out this research conversation on AskAnything: '{curr_title}'\n\nLink: {share_url}"
@@ -672,8 +735,13 @@ for msg_idx, msg in enumerate(active_messages):
 
         # Display Assistant Intelligence Badges
         if role == "assistant":
-            # 0. Live Web Search Fallback Badge
-            if msg.get("is_web_search"):
+            # 0. Live Web Search / Combined Sources Badge
+            if msg.get("is_combined_search"):
+                st.markdown(
+                    '<div class="badge-web">🌐 Combined Sources: Uploaded Docs + Live Web Search</div>',
+                    unsafe_allow_html=True,
+                )
+            elif msg.get("is_web_search"):
                 st.markdown(
                     '<div class="badge-web">🌐 Live Web Search Fallback (Open Source Material)</div>',
                     unsafe_allow_html=True,
@@ -811,6 +879,7 @@ if user_query and not is_shared_view:
             raw_chunks = rag_result.get("raw_chunks", [])
             is_insufficient = rag_result.get("is_insufficient_evidence", False)
             is_web_search = rag_result.get("is_web_search", False)
+            is_combined_search = rag_result.get("is_combined_search", False)
 
             st.markdown(answer)
 
@@ -826,7 +895,12 @@ if user_query and not is_shared_view:
                         st.audio(audio_bytes, format="audio/mp3")
 
             # Intelligence Badges
-            if is_web_search:
+            if is_combined_search:
+                st.markdown(
+                    '<div class="badge-web">🌐 Combined Sources: Uploaded Docs + Live Web Search</div>',
+                    unsafe_allow_html=True,
+                )
+            elif is_web_search:
                 st.markdown(
                     '<div class="badge-web">🌐 Live Web Search Fallback (Open Source Material)</div>',
                     unsafe_allow_html=True,
@@ -873,6 +947,7 @@ if user_query and not is_shared_view:
                 "query_asked": user_query,
                 "audio_bytes": audio_bytes,
                 "is_web_search": is_web_search,
+                "is_combined_search": is_combined_search,
             })
 
             # Auto-save session permanently to disk

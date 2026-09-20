@@ -81,7 +81,45 @@ class TestWebSearchRetriever(unittest.TestCase):
         )
         self.assertTrue(res["is_insufficient_evidence"])
         self.assertFalse(res.get("is_web_search", False))
-        self.assertEqual(len(res["citations"]), 0)
+    def test_low_score_combines_pdf_and_web(self):
+        # Local chunks exist but have low relevance score (e.g. 0.38 < 0.50)
+        local_chunk = DocumentChunk(
+            chunk_id="local_chunk_1",
+            document_id="doc_pdf_1",
+            session_id="test_session",
+            text="Quantum computing utilizes qubits for computation.",
+            source_type="pdf",
+            filename="quantum_notes.pdf",
+            page_number=3,
+        )
+        mock_vs = MagicMock(spec=HybridVectorStore)
+        mock_vs.hybrid_search.return_value = [(local_chunk, 0.38)]
+        mock_vs.get_session_overview_chunks.return_value = []
+
+        fake_web_hit = [
+            {
+                "title": "Quantum Supremacy Progress - MIT Tech Review",
+                "link": "https://technologyreview.com/quantum",
+                "snippet": "Researchers demonstrated breakthrough quantum advantage.",
+                "source": "Web Search",
+            }
+        ]
+
+        with patch.object(WebSearchRetriever, "search", return_value=fake_web_hit):
+            engine = RAGEngine(vectorstore=mock_vs, api_key=None)
+            res = engine.answer_query(
+                session_id="test_session",
+                user_query="What is quantum supremacy?",
+                enable_web_fallback=True,
+            )
+
+            self.assertTrue(res["is_web_search"])
+            self.assertTrue(res["is_combined_search"])
+            # Combined chunks should include both local and web chunks
+            self.assertEqual(len(res["raw_chunks"]), 2)
+            # Both types of citations present
+            citation_sources = [c.get("source_type") for c in res["citations"]]
+            self.assertIn("web", citation_sources)
 
 
 if __name__ == "__main__":

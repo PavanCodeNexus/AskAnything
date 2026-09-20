@@ -120,6 +120,10 @@ class PDFLoader(BaseLoader):
                         error_message="PDF contains 0 pages.",
                     )
 
+                # Fast digital text check: only invoke heavy OCR if document is genuinely a scanned PDF
+                total_digital_chars = sum(len(page.get_text("text").strip()) for page in pdf)
+                is_scanned_pdf = total_digital_chars < 50
+
                 for page_idx in range(total_pages):
                     page = pdf[page_idx]
                     page_num = page_idx + 1
@@ -136,8 +140,8 @@ class PDFLoader(BaseLoader):
                     # 3. Cleaning
                     clean_page_text = sanitize_text_content(raw_page_text)
 
-                    # If page has very little or no digital text, fallback to OCR on page render
-                    if len(clean_page_text.strip()) < 25:
+                    # Only run heavy OCR on pages if the entire PDF has virtually zero digital text (scanned document)
+                    if is_scanned_pdf and len(clean_page_text.strip()) < 25:
                         try:
                             pix = page.get_pixmap(dpi=150)
                             img_data = pix.tobytes("png")
