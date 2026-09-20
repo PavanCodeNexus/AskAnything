@@ -208,6 +208,43 @@ CUSTOM_CSS = """
         align-items: center;
         justify-content: space-between;
     }
+
+    /* Sidebar Chat Action Buttons: Ensure emojis/symbols are always fully visible */
+    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+        gap: 3px !important;
+        margin-bottom: 3px !important;
+        align-items: center !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > [data-testid="column"] {
+        padding: 0 !important;
+        min-width: 0 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > [data-testid="column"] button {
+        padding: 2px 2px !important;
+        min-height: 32px !important;
+        height: 32px !important;
+        width: 100% !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] > [data-testid="column"] button p {
+        font-size: 15px !important;
+        line-height: 1 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+        text-overflow: unset !important;
+        white-space: nowrap !important;
+    }
+    .active-chat-toolbar {
+        background: rgba(99, 102, 241, 0.08);
+        border: 1px solid rgba(99, 102, 241, 0.25);
+        border-radius: 8px;
+        padding: 4px 6px;
+        margin-top: 2px;
+        margin-bottom: 8px;
+    }
 </style>
 """
 st.markdown(CUSTOM_CSS, unsafe_allow_html=True)
@@ -436,10 +473,10 @@ with st.sidebar:
                                 st.session_state.renaming_session_id = None
                                 st.rerun()
                 else:
-                    col_main, col_pin, col_ren, col_del = st.columns([5.5, 1.2, 1.2, 1.2])
+                    col_main, col_pin, col_ren, col_del = st.columns([5.2, 1.4, 1.4, 1.4])
                     with col_main:
-                        prefix = "📍 " if s_pinned else ("● " if is_active else "")
-                        short_title = (s_title[:20] + "...") if len(s_title) > 20 else s_title
+                        prefix = "📌 " if s_pinned else ("● " if is_active else "")
+                        short_title = (s_title[:18] + "...") if len(s_title) > 18 else s_title
                         btn_label = f"{prefix}{short_title}"
                         btn_type = "primary" if is_active else "secondary"
                         if st.button(
@@ -480,6 +517,29 @@ with st.sidebar:
                                 st.session_state.chat_history = []
                                 st.session_state.documents = {}
                             st.rerun()
+
+                    # Highlighted active chat action toolbar for quick 1-click controls
+                    if is_active:
+                        with st.container():
+                            c_a1, c_a2, c_a3 = st.columns([1, 1, 1])
+                            with c_a1:
+                                pin_lbl = "📍 Unpin" if s_pinned else "📌 Pin"
+                                if st.button(pin_lbl, key=f"bar_pin_{s_id}", help="Pin/Unpin", use_container_width=True):
+                                    ChatHistoryManager.pin_session(s_id)
+                                    st.rerun()
+                            with c_a2:
+                                if st.button("✏️ Rename", key=f"bar_ren_{s_id}", help="Rename this chat", use_container_width=True):
+                                    st.session_state.renaming_session_id = s_id
+                                    st.rerun()
+                            with c_a3:
+                                if st.button("🗑️ Delete", key=f"bar_del_{s_id}", help="Delete this chat", use_container_width=True):
+                                    ChatHistoryManager.delete_session(s_id)
+                                    new_id = str(uuid.uuid4())[:8]
+                                    st.session_state.session_id = new_id
+                                    st.session_state.sessions[new_id] = "New chat"
+                                    st.session_state.chat_history = []
+                                    st.session_state.documents = {}
+                                    st.rerun()
     else:
         st.caption("No chats yet. Ask a question to start your first chat!")
 
