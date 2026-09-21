@@ -15,7 +15,7 @@
 | # | Feature | Capability |
 |---|---|---|
 | 1 | **Heterogeneous Ingestion** | Simultaneously upload & cross-reference PDFs, web URLs, YouTube video transcripts, images/diagrams via OCR, and plain text notes in one session. |
-| 2 | **ChatGPT & Gemini-Style Chat History** | Chronologically organized history (**📌 Pinned**, **Today**, **Yesterday**, **Previous 7 Days**, **Older**). Supports 1-click **Pin/Unpin**, inline **Rename**, **Delete**, and atomic JSON storage with corrupt-file auto-quarantine. |
+| 2 | **Chat History** | Chronologically organized history (**📌 Pinned**, **Today**, **Yesterday**, **Previous 7 Days**, **Older**). Supports 1-click **Pin/Unpin**, inline **Rename**, **Delete**, and atomic JSON storage with corrupt-file auto-quarantine. |
 | 3 | **Autonomous Web Search & Fusion (< 75%)** | When local documents lack sufficient evidence (relevance score < 75%), AskAnything automatically searches the live web and synthesizes facts from both your uploaded files and live web search results. |
 | 4 | **Share Chat via Direct Link** | Generate instant public snapshot links with 1-click sharing to **WhatsApp** and **Instagram Direct**. Recipients can read the conversation or clone it to their workspace. |
 | 5 | **Unique Handwritten Chalkboard Mind Map** | Visual concept mind maps styled like study notes on a dark chalkboard graph paper, featuring **multi-sentence handwritten explanations** inside each card and 1-click clear controls. |
